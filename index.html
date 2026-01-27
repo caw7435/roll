@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>草莓園幸運轉盤</title>
+    <style>
+      body {
+        font-family: "Microsoft JhengHei", sans-serif;
+        background-color: #fff0f5; /* 淡粉色背景 */
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        margin: 0;
+      }
+
+      h1 {
+        color: #d32f2f;
+        margin-bottom: 10px;
+      }
+
+      .game-container {
+        position: relative;
+        width: 300px;
+        height: 300px;
+        margin-bottom: 20px;
+      }
+
+      canvas {
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        transition: transform 4s cubic-bezier(0.25, 0.1, 0.25, 1);
+      }
+
+      .pointer {
+        position: absolute;
+        top: -10px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 0;
+        height: 0;
+        border-left: 15px solid transparent;
+        border-right: 15px solid transparent;
+        border-top: 30px solid #d32f2f;
+        z-index: 10;
+      }
+
+      .controls {
+        background: white;
+        padding: 20px;
+        border-radius: 15px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        text-align: center;
+      }
+
+      input {
+        padding: 10px;
+        border: 2px solid #ffb6c1;
+        border-radius: 5px;
+        font-size: 16px;
+        width: 200px;
+        text-align: center;
+        outline: none;
+      }
+
+      button {
+        margin-top: 10px;
+        padding: 10px 20px;
+        background-color: #d32f2f;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        font-size: 16px;
+        cursor: pointer;
+        transition: background 0.3s;
+      }
+
+      button:hover {
+        background-color: #b71c1c;
+      }
+
+      button:disabled {
+        background-color: #ccc;
+        cursor: not-allowed;
+      }
+
+      #result {
+        margin-top: 15px;
+        font-weight: bold;
+        font-size: 18px;
+        color: #333;
+        min-height: 24px;
+      }
+
+      .note {
+        margin-top: 10px;
+        font-size: 12px;
+        color: #666;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🍓 草莓幸運轉盤</h1>
+
+    <div class="game-container">
+      <div class="pointer"></div>
+      <canvas id="wheelCanvas" width="500" height="500"></canvas>
+    </div>
+
+    <div class="controls">
+      <input type="text" id="couponCode" placeholder="請輸入優惠券代碼" />
+      <br />
+      <button id="spinBtn" onclick="startGame()">開始抽獎</button>
+      <div id="result"></div>
+      <div class="note">
+        一獎:草莓一盒、二獎:草莓凍乾、三獎:冰淇淋、普獎:折價券
+      </div>
+    </div>
+
+    <script>
+      const canvas = document.getElementById("wheelCanvas");
+      const ctx = canvas.getContext("2d");
+      const spinBtn = document.getElementById("spinBtn");
+      const resultDiv = document.getElementById("result");
+      const codeInput = document.getElementById("couponCode");
+
+      // ========== 請確認這裡是用「新版本部署」後的網址 ==========
+      const API_URL =
+        "https://script.google.com/macros/s/AKfycbzZ_3oGG1j9DnyigrXJfYLNqTflmjtkC_UeJr382yvTxahTKF3ofe2CAkhFe1mJ-f-C/exec";
+      // ======================================================
+
+      // 視覺獎項 (不變，僅供顯示)
+      const visualSegments = [
+        "一獎:草莓一盒",
+        "普獎:折價券",
+        "二獎:草莓凍乾",
+        "普獎:折價券",
+        "三獎:冰淇淋",
+        "普獎:折價券",
+        "普獎:折價券",
+        "普獎:折價券",
+      ];
+
+      const colors = [
+        "#FFEBEE",
+        "#FFCDD2",
+        "#EF9A9A",
+        "#E57373",
+        "#EF5350",
+        "#FFCDD2",
+        "#FFEBEE",
+        "#FFCDD2",
+      ];
+      let currentRotation = 0;
+
+      // 繪圖函式 (不變)
+      function drawWheel() {
+        const arc = (Math.PI * 2) / visualSegments.length;
+        for (let i = 0; i < visualSegments.length; i++) {
+          ctx.beginPath();
+          ctx.fillStyle = colors[i];
+          ctx.moveTo(250, 250);
+          ctx.arc(250, 250, 250, i * arc - arc / 2, (i + 1) * arc - arc / 2);
+          ctx.fill();
+          ctx.save();
+          ctx.translate(250, 250);
+          ctx.rotate(i * arc);
+          ctx.textAlign = "right";
+          ctx.fillStyle = "#B71C1C";
+          ctx.font = "bold 24px Microsoft JhengHei";
+          ctx.fillText(visualSegments[i].split(":")[0], 220, 10);
+          ctx.restore();
+        }
+      }
+      drawWheel();
+
+      // ★★★ 核心修改：依照等級計算機率 ★★★
+      function getPrize(level) {
+        const rand = Math.random() * 100;
+        let p1, p2, p3;
+
+        // 判斷等級，設定機率閥值
+        // LV1: 1獎3%, 2獎5%, 3獎7% (累計: 3, 8, 15)
+        // LV2: 1獎1.5%, 2獎2.5%, 3獎3.5% (累計: 1.5, 4, 7.5)
+        // LV3: 1獎0.5%, 2獎1.5%, 3獎2% (累計: 0.5, 2, 4)
+
+        if (level.includes("LV3")) {
+          p1 = 0.5;
+          p2 = 1.5;
+          p3 = 2.0;
+        } else if (level.includes("LV2")) {
+          p1 = 1.5;
+          p2 = 2.5;
+          p3 = 3.5;
+        } else {
+          // 預設 LV1
+          p1 = 3.0;
+          p2 = 5.0;
+          p3 = 7.0;
+        }
+
+        console.log(
+          `目前等級: ${level}, 機率設定: 一獎<${p1}, 二獎<${p1 + p2}, 三獎<${
+            p1 + p2 + p3
+          }`
+        );
+
+        // 判斷中獎 (使用累計機率)
+        if (rand < p1) return { name: "一獎：草莓一盒", index: 0 };
+        if (rand < p1 + p2) return { name: "二獎：草莓凍乾一罐", index: 2 };
+        if (rand < p1 + p2 + p3)
+          return { name: "三獎：草莓冰淇淋一杯", index: 4 };
+
+        // 沒中大獎，隨機給普獎
+        const normalIndices = [1, 3, 5, 6, 7];
+        const randomNormal =
+          normalIndices[Math.floor(Math.random() * normalIndices.length)];
+        return { name: "普獎：草莓折價券30元", index: randomNormal };
+      }
+
+      function startGame() {
+        const code = codeInput.value.trim();
+
+        if (!code) {
+          alert("請輸入優惠券代碼！");
+          return;
+        }
+
+        spinBtn.disabled = true;
+        spinBtn.innerText = "驗證中...";
+        resultDiv.innerText = "正在確認代碼與等級...";
+
+        fetch(API_URL, {
+          method: "POST",
+          body: JSON.stringify({ code: code }),
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.status === "success") {
+              // ★ 驗證成功，傳入後端回傳的 level (例如 "LV2")
+              performSpin(data.level);
+            } else if (data.status === "used") {
+              alert("這組代碼已經使用過了喔！");
+              resetButton();
+            } else {
+              alert("找不到這組代碼，請確認是否輸入正確。");
+              resetButton();
+            }
+          })
+          .catch((error) => {
+            console.error("Error:", error);
+            alert("連線發生錯誤，請稍後再試。");
+            resetButton();
+          });
+      }
+
+      function resetButton() {
+        spinBtn.disabled = false;
+        spinBtn.innerText = "開始抽獎";
+        resultDiv.innerText = "";
+      }
+
+      function performSpin(level) {
+        spinBtn.innerText = "抽獎中...";
+
+        // ★ 將等級傳入機率計算函式
+        const prize = getPrize(level);
+
+        const segmentAngle = 360 / visualSegments.length;
+        const rotateAmount = 360 * 5 + (360 - prize.index * segmentAngle) - 90;
+        const randomOffset = Math.floor(Math.random() * 20) - 10;
+
+        currentRotation += rotateAmount + randomOffset;
+        canvas.style.transform = `rotate(${currentRotation}deg)`;
+
+        setTimeout(() => {
+          resultDiv.innerText = `恭喜獲得：${prize.name}`;
+          resultDiv.style.color = "#d32f2f";
+          alert(`恭喜！你抽中了 ${prize.name}！\n(等級: ${level})`);
+          spinBtn.disabled = false;
+          spinBtn.innerText = "開始抽獎";
+          codeInput.value = "";
+        }, 4000);
+      }
+    </script>
+  </body>
+</html>
